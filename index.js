@@ -19,8 +19,8 @@ app.post("/sync", async (req, res) => {
       await client.index({
         index: indexName,
         id: record.id.toString(), // ID real de tu PostgreSQL
-        document: {
-          usuario_id: record.usuario_id, // Guarda de quién es el bloque
+        body: {
+          user_id: record.user_id, // Guarda de quién es el bloque
           nombre: record.nombre || record.nombre, // Guarda el nombre del bloque
         },
       });
@@ -39,25 +39,27 @@ app.post("/sync", async (req, res) => {
 
 // 2. ENDPOINT DE BÚSQUEDA (Angular llama aquí)
 app.get("/search", async (req, res) => {
-  const { q, usuario_id } = req.query;
+  const { q, user_id } = req.query;
 
-  if (!q || !usuario_id) return res.json([]);
+  if (!q || !user_id) return res.json([]);
 
   try {
-    const resultado = await client.search({
+    const { body } = await client.search({
       index: indexName,
-      query: {
-        bool: {
-          must: [
-            { match: { usuario_id: usuario_id } }, //Solo trae datos de ESTE usuario
-            {
-              multi_match: {
-                query: q,
-                fields: ["nombre"], // Busca en estos campos
-                fuzziness: "AUTO", // Tolera errores ortográficos
+      body: {
+        query: {
+          bool: {
+            must: [
+              { match: { user_id: user_id } }, // Trae la información solo de este usuario
+              {
+                multi_match: {
+                  query: q,
+                  fields: ["titulo", "notas"], // Busca en estos campos
+                  fuzziness: "AUTO", // Tolera errores ortográficos
+                },
               },
-            },
-          ],
+            ],
+          },
         },
       },
     });
