@@ -10,24 +10,30 @@ app.use(express.json());
 const client = new Client({ node: process.env.ELASTIC_URL });
 const indexName = "bloques_rutinas";
 
-async function inicializarIndice() {
-  try {
-    const { body: exists } = await client.indices.exists({ index: indexName });
-    if (!exists) {
-      console.log(`Creando el índice '${indexName}' en Bonsai...`);
-      await client.indices.create({ index: indexName });
-      console.log("Índice creado exitosamente.");
-    } else {
-      console.log(`El índice '${indexName}' ya está listo para usarse.`);
-    }
-  } catch (error) {
-    console.error("Error al inicializar el índice:", error);
+async function garantizarIndice() {
+  const { body: exists } = await client.indices.exists({ index: indexName });
+  if (!exists) {
+    console.log(
+      `Creando el índice '${indexName}' con configuración mínima en Bonsai...`,
+    );
+    await client.indices.create({
+      index: indexName,
+      body: {
+        settings: {
+          number_of_shards: 1,
+          number_of_replicas: 0,
+        },
+      },
+    });
+    console.log("Índice creado exitosamente.");
   }
 }
 
 // 1. ENDPOINT DE SINCRONIZACIÓN (Webhook de Supabase)
 app.post("/sync", async (req, res) => {
   try {
+    await garantizarIndice();
+
     const { type, record } = req.body;
 
     if (type === "INSERT" || type === "UPDATE") {
@@ -59,6 +65,8 @@ app.get("/search", async (req, res) => {
   if (!q || !user_id) return res.json([]);
 
   try {
+    await garantizarIndice();
+
     const { body } = await client.search({
       index: indexName,
       body: {
@@ -82,13 +90,12 @@ app.get("/search", async (req, res) => {
     const hits = body.hits.hits.map((hit) => hit._source);
     res.json(hits);
   } catch (error) {
-    console.error(error);
+    console.error("Error en búsqueda:", error);
     res.status(500).json({ error: "Error interno del buscador" });
   }
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, async () => {
-  console.log(`Buscador activo en puerto ${PORT}`);
-  await inicializarIndice();
+app.listen(PORT, () => {
+  console.log(`Buscador activo y esperando webhooks en el puerto ${PORT}`);
 });
