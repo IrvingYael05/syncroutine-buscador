@@ -10,25 +10,40 @@ app.use(express.json());
 const client = new Client({ node: process.env.ELASTIC_URL });
 const indexName = "bloques_rutinas";
 
-// 1. ENDPOINT DE SINCRONIZACIÓN (Supabase llama aquí)
+async function inicializarIndice() {
+  try {
+    const { body: exists } = await client.indices.exists({ index: indexName });
+    if (!exists) {
+      console.log(`Creando el índice '${indexName}' en Bonsai...`);
+      await client.indices.create({ index: indexName });
+      console.log("Índice creado exitosamente.");
+    } else {
+      console.log(`El índice '${indexName}' ya está listo para usarse.`);
+    }
+  } catch (error) {
+    console.error("Error al inicializar el índice:", error);
+  }
+}
+
+// 1. ENDPOINT DE SINCRONIZACIÓN (Webhook de Supabase)
 app.post("/sync", async (req, res) => {
   try {
-    const { type, record } = req.body; // Supabase manda la fila de la BD aquí
+    const { type, record } = req.body;
 
     if (type === "INSERT" || type === "UPDATE") {
       await client.index({
         index: indexName,
-        id: record.id.toString(), // ID real de tu PostgreSQL
+        id: record.id.toString(),
         body: {
-          user_id: record.user_id, // Guarda de quién es el bloque
-          nombre: record.nombre || record.nombre, // Guarda el nombre del bloque
+          user_id: record.user_id,
+          nombre: record.nombre,
+          es_aleatorio: record.es_aleatorio,
         },
       });
     } else if (type === "DELETE") {
       await client.delete({ index: indexName, id: record.id.toString() });
     }
 
-    // Refrescar índice
     await client.indices.refresh({ index: indexName });
     res.status(200).send("OK: Elasticsearch sincronizado");
   } catch (error) {
@@ -37,7 +52,7 @@ app.post("/sync", async (req, res) => {
   }
 });
 
-// 2. ENDPOINT DE BÚSQUEDA (Angular llama aquí)
+// 2. ENDPOINT DE BÚSQUEDA (Frontend en Angular)
 app.get("/search", async (req, res) => {
   const { q, user_id } = req.query;
 
@@ -50,12 +65,12 @@ app.get("/search", async (req, res) => {
         query: {
           bool: {
             must: [
-              { match: { user_id: user_id } }, // Trae la información solo de este usuario
+              { match: { user_id: user_id } },
               {
                 multi_match: {
                   query: q,
-                  fields: ["titulo", "notas"], // Busca en estos campos
-                  fuzziness: "AUTO", // Tolera errores ortográficos
+                  fields: ["nombre"],
+                  fuzziness: "AUTO",
                 },
               },
             ],
@@ -64,7 +79,7 @@ app.get("/search", async (req, res) => {
       },
     });
 
-    const hits = resultado.hits.hits.map((hit) => hit._source);
+    const hits = body.hits.hits.map((hit) => hit._source);
     res.json(hits);
   } catch (error) {
     console.error(error);
@@ -72,6 +87,8 @@ app.get("/search", async (req, res) => {
   }
 });
 
-// Arrancar el servidor
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Buscador activo en puerto ${PORT}`));
+app.listen(PORT, async () => {
+  console.log(`Buscador activo en puerto ${PORT}`);
+  await inicializarIndice();
+});
